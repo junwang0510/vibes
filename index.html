@@ -1,130 +1,85 @@
+<!DOCTYPE html>
 <html>
-    <title> vibe images <!-- change this to whatever you want! --> </title>
-    <!-- Add any text here if you so desire; the images won't be drawn over it. -->
-    <div id="container">
-    </div>
-    <script>
+<head>
+  <meta charset="utf-8">
+  <title>vibe images</title>
+  <style>
+    /* make sure container fills the viewport */
+    html, body { margin:0; padding:0; width:100%; height:100%; position:relative; }
+    #container { position:relative; width:100%; height:100%; }
+    img { position:absolute; }
+  </style>
+</head>
+<body>
+  <div id="container"></div>
+  <script>
+    async function main() {
+      // load & shuffle
+      const data = await fetch("image_widths_heights.json").then(r => {
+        if (!r.ok) throw new Error("Can't load JSON -- are you running a server?");
+        return r.json();
+      });
+      for (let i = data.length - 1; i > 0; i--) {
+        const j = Math.random() * (i + 1) | 0;
+        [data[i], data[j]] = [data[j], data[i]];
+      }
 
-function shuffleArray(array) {
-    for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-    }
-    return array;
-}
+      const container = document.getElementById("container");
+      const screenW = window.innerWidth;
+      const textNodes = [];
+      const walker = document.createTreeWalker(
+        document.body, NodeFilter.SHOW_TEXT,
+        { acceptNode: n => n.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT }
+      );
+      while (walker.nextNode()) textNodes.push(walker.currentNode);
 
-fetch("image_widths_heights.json").then(f => {
-    if (f.status == 404) {
-        alert("unable to find image_widths_heights.json -- you should run lister.py to create it.");
-    }
-    return f.json()
-}).then(data => {
-    let key_values = shuffleArray(data);
+      const positions = [];
+      let maxY = 600;
 
-    const rect = container.getBoundingClientRect();
-    let screen_width = rect.width;
+      for (const [name, [w0, h0]] of data) {
+        // 1) resize to fit within 500×500, keep aspect
+        const ratio = Math.min(1, 500 / w0, 500 / h0);
+        const w = (w0 * ratio) | 0;
+        const h = (h0 * ratio) | 0;
 
-    // By default I will have a lot of images that are just enormous and take up most of the screen. Here I attempt
-    // to resize the images to be approximately a similar size.
-    // To adjust image size, change goal_pixels here.
-    const pairs = key_values.map(([key, [w, h]]) => {
-        let goal_pixels = 500*300;
-        let actual_pixels = w*h;
-        if (actual_pixels/goal_pixels > 16) {
-            return [parseInt(w/8), parseInt(h/8)];
-        }
-        if (actual_pixels/goal_pixels > 4) {
-            return [parseInt(w/4), parseInt(h/4)];
-        }
-        return [parseInt(w/2), parseInt(h/2)];
-    }).map(([w, h]) => [(w+10) > screen_width ? screen_width-10 : w, h]);
+        // 2) find a non-overlapping spot
+        let x, y, ok;
+        do {
+          ok = true;
+          x = Math.random() * (screenW - w) | 0;
+          y = Math.random() * (maxY - h) | 0;
 
-    // gather all the text nodes so the images don't intersect them
-    const textNodes = [];
-    const treeWalker = document.createTreeWalker(
-        document.body,
-        NodeFilter.SHOW_TEXT,
-        { acceptNode: (node) => node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT }
-    );
-    while(treeWalker.nextNode()) textNodes.push(treeWalker.currentNode);
-
-    // Now we attempt to place images. I looked at some actually good algorithms but decided to instead use a stupid
-    // algorithm: for each image, attempt to place it in a random location up to height 600. if it intersects with
-    // any other images, try again. If after 50 attempts at random placing we don't manage to place it, increase the
-    // height by 50.
-    let positions = [];
-    let i = 0;
-    // this could be a for loop, but i thought it would be fun to have them appear gradually.
-    let interval = setInterval(() => {
-        let height = 600;
-        let [w, h] = pairs[i];
-        while (1) {
-            let found_place = false;
-            let w_max = screen_width-w;
-            let h_max = height-h;
-            for (let _ = 0; _ < 50; _++) {
-                let a_left = Math.random() * w_max;
-                let a_top = Math.random() * h_max;
-                let a_right = a_left+w;
-                let a_bottom = a_top+h;
-
-                // do intersection checks against images
-                let intersects = false;
-                for (let j = 0; j < positions.length; j++) {
-                    let [b_left, b_top] = positions[j];
-                    let b_right = b_left + pairs[j][0];
-                    let b_bottom = b_top + pairs[j][1];
-                    if (a_left < b_right && a_right > b_left && a_bottom > b_top && a_top < b_bottom) {
-                        intersects = true;
-                        break;
-                    }
-                }
-
-                // do intersection checks against text. TOCONSIDER: cache bounding rect calculation?
-                for (const node of textNodes) {
-                    const range = document.createRange();
-                    range.selectNodeContents(node);
-                    const rect = range.getBoundingClientRect();
-                    let node_top = rect.top + window.pageYOffset;
-                    let node_left = rect.left + window.pageXOffset;
-
-                    if (a_left < (node_left+rect.width) && a_right > node_left && a_bottom > node_top && a_top < (node_top+rect.height)) {
-                        intersects = true;
-                        break;
-                    }
-                }
-
-                if (!intersects) {
-                    found_place = true;
-                    positions.push([parseInt(a_left), parseInt(a_top)]);
-                    break;
-                }
+          for (const pos of positions) {
+            if (x < pos.x + pos.w && x + w > pos.x && y < pos.y + pos.h && y + h > pos.y) {
+              ok = false; break;
             }
-            if (found_place) {
-                break;
-            } else {
-                height += 50;
+          }
+          for (const node of textNodes) {
+            const r = document.createRange();
+            r.selectNodeContents(node);
+            const rc = r.getBoundingClientRect();
+            const nx = rc.left + pageXOffset, ny = rc.top + pageYOffset;
+            if (x < nx + rc.width && x + w > nx && y < ny + rc.height && y + h > ny) {
+              ok = false; break;
             }
-        }
+          }
+          if (!ok && y + h > maxY) maxY += 50;
+        } while (!ok);
 
-        // Create the image
-        let img = document.createElement("img");
-        img.src = "images/" + key_values[i][0];
-        img.width = pairs[i][0];
-        img.height = pairs[i][1];
-        img.style.width = pairs[i][0];
-        img.style.height = pairs[i][1];
-        img.style.position = "absolute";
-        img.style.top = positions[i][1];
-        img.style.left = positions[i][0];
-        img.loading = "lazy";
+        positions.push({ x, y, w, h });
+
+        // 3) append image
+        const img = document.createElement("img");
+        img.loading = 'lazy';
+        img.src     = "images/" + name;
+        img.width   = w;
+        img.height  = h;
+        img.style.left = x + "px";
+        img.style.top  = y + "px";
         container.appendChild(img);
-
-        i++;
-        if (i == key_values.length) {
-            clearInterval(interval);
-        }
-    }, 100);
-})
-    </script>
+      }
+    }
+    main();
+  </script>
+</body>
 </html>
